@@ -3,8 +3,11 @@
  *
  * Usage:
  *   // instrumentation-client.ts (Next.js 15+)
- *   import { init } from 'oakdata-js'
- *   init({ key: process.env.NEXT_PUBLIC_OAK_KEY!, host: process.env.NEXT_PUBLIC_OAK_HOST })
+ *   import oak from 'oakdata-js'
+ *
+ *   oak.init(process.env.NEXT_PUBLIC_OAK_KEY!, {
+ *     api_host: process.env.NEXT_PUBLIC_OAK_HOST,
+ *   })
  */
 import type { OakApi, Props, UrlSnapshot, UserConfig } from './types'
 import { buildConfig, createLog } from './config'
@@ -24,15 +27,38 @@ import { installReplay, type ReplayController } from './replay'
 import { loadRemoteConfig } from './remote-config'
 import { uaParse } from './device'
 
-export type { UserConfig, OakApi, Props } from './types'
+export type { OakApi, Props } from './types'
 
 /**
- * Initialize the OakData tracker. Returns the API instance, and also assigns
- * it to `window.oak` so legacy code that reaches for the global keeps working.
+ * Options passed to `oak.init(key, options)`. Snake_case throughout to
+ * match the JS-analytics convention; mapped internally to UserConfig.
  *
- * Safe to call multiple times — re-calling is a no-op after the first init.
+ * Unknown keys (e.g. `defaults`) are accepted and ignored — there for
+ * forward-compatibility with future snapshotted defaults.
  */
-export function init(userConfig: UserConfig): OakApi | null {
+export type InitOptions = {
+  api_host?: string
+  autocapture?: boolean
+  capture_pageview?: boolean
+  respect_dnt?: boolean
+  debug?: boolean
+  /** Version-pinned defaults marker, accepted for forward-compat (no-op today). */
+  defaults?: string
+  /** Called once the tracker is wired up. */
+  loaded?: (oak: OakApi) => void
+}
+
+function mapOptions(options: InitOptions): Omit<UserConfig, 'key'> {
+  return {
+    host: options.api_host,
+    debug: options.debug,
+    autotrack: options.autocapture,
+    pageviews: options.capture_pageview,
+    respectDnt: options.respect_dnt,
+  }
+}
+
+function bootstrap(userConfig: UserConfig): OakApi | null {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     // SSR no-op. Customers can call this from Next.js instrumentation-client.ts;
     // we don't want it to blow up during prerender.
@@ -247,4 +273,68 @@ export function init(userConfig: UserConfig): OakApi | null {
   return api
 }
 
-export default { init }
+// ─── Singleton API ───────────────────────────────────────────────────────────
+//
+// Customers import the default and call `oak.init(key, options)` once. Method
+// calls before init are queued and replayed once the tracker comes up, so it's
+// safe to fire `oak.capture(...)` from anywhere without worrying about ordering.
+
+type QueuedCall = { method: keyof OakApi; args: unknown[] }
+let liveApi: OakApi | null = null
+const preInitQueue: QueuedCall[] = []
+
+function proxy<K extends keyof OakApi>(method: K) {
+  return (...args: unknown[]): void => {
+    if (liveApi) {
+      ;(liveApi[method] as (...a: unknown[]) => unknown)(...args)
+    } else {
+      preInitQueue.push({ method, args })
+    }
+  }
+}
+
+const oak = {
+  /**
+   * Boot the tracker. Returns the underlying API instance (also kept on
+   * `window.oak`). Calling twice is a no-op — the first init wins.
+   */
+  init(key: string, options: InitOptions = {}): OakApi | null {
+    if (liveApi) return liveApi
+    const userConfig: UserConfig = { key, ...mapOptions(options) }
+    liveApi = bootstrap(userConfig)
+    if (liveApi) {
+      const drained = liveApi
+      for (const { method, args } of preInitQueue) {
+        const fn = drained[method] as unknown
+        if (typeof fn === 'function') (fn as (...a: unknown[]) => unknown)(...args)
+      }
+      preInitQueue.length = 0
+      if (options.loaded) {
+        try { options.loaded(drained) } catch {}
+      }
+    }
+    return liveApi
+  },
+
+  capture: proxy('capture'),
+  track: proxy('track'),
+  identify: proxy('identify'),
+  page: proxy('page'),
+  alias: proxy('alias'),
+  set: proxy('set'),
+  setOnce: proxy('setOnce'),
+  register: proxy('register'),
+  unregister: proxy('unregister'),
+  group: proxy('group'),
+  reset: proxy('reset'),
+  opt_out: proxy('opt_out'),
+  opt_in: proxy('opt_in'),
+  flush: proxy('flush'),
+
+  // Getters return null pre-init rather than queuing — values aren't known yet.
+  getDistinctId(): string | null { return liveApi?.getDistinctId() ?? null },
+  getSessionId(): string | null { return liveApi?.getSessionId() ?? null },
+}
+
+export default oak
+

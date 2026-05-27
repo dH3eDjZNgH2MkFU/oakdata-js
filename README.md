@@ -2,7 +2,7 @@
 
 OakData web analytics SDK — a drop-in tracker for browser and Next.js apps.
 
-Captures pageviews, autocaptured clicks, web vitals, errors, sessions, and (optionally) session replay. Same engine as the `<script src="oak.js">` snippet, packaged for modern bundlers.
+Captures pageviews, autocaptured clicks, web vitals, errors, sessions, and (optionally) session replay.
 
 ## Install
 
@@ -15,11 +15,10 @@ npm install oakdata-js
 Create `instrumentation-client.ts` at your project root:
 
 ```ts
-import { init } from 'oakdata-js'
+import oak from 'oakdata-js'
 
-init({
-  key: process.env.NEXT_PUBLIC_OAK_KEY!,
-  host: process.env.NEXT_PUBLIC_OAK_HOST, // optional, defaults to current origin
+oak.init(process.env.NEXT_PUBLIC_OAK_KEY!, {
+  api_host: process.env.NEXT_PUBLIC_OAK_HOST,
 })
 ```
 
@@ -37,31 +36,43 @@ That's it — pageviews + autocapture start immediately.
 After signin/signup, call `identify` with the user's id and any traits you want to see in the OakData dashboard:
 
 ```ts
-import { init } from 'oakdata-js'
+import oak from 'oakdata-js'
 
-const oak = init({ key: process.env.NEXT_PUBLIC_OAK_KEY!, host: process.env.NEXT_PUBLIC_OAK_HOST })
-
-oak?.identify(user.id, {
+oak.identify(user.id, {
   email: user.email,
   name: user.name,
 })
 ```
 
-On signout, call `oak.reset()` to clear stored ids before the next visitor.
+Calls made before `init()` are queued and replayed once the tracker comes up, so it's safe to call `oak.identify` from anywhere without worrying about boot ordering. On signout, call `oak.reset()` to clear stored ids.
 
 ## API
 
 ```ts
-const oak = init({ key, host })
-oak.track('signup_completed', { plan: 'pro' })
+import oak from 'oakdata-js'
+
+oak.init(key, options)                  // boot the tracker (once)
+oak.capture('signup_completed', { plan: 'pro' })
 oak.identify(userId, { email })
 oak.page()
 oak.set({ plan: 'enterprise' })
 oak.group('company', 'acme-co', { name: 'Acme' })
 oak.reset()
+oak.flush()
+oak.getDistinctId()
+oak.getSessionId()
 ```
 
-Full API reference: see [`OakApi` in `src/types.ts`](./src/types.ts).
+### `oak.init(key, options)`
+
+| Option              | Type                       | Default                           |
+| ------------------- | -------------------------- | --------------------------------- |
+| `api_host`          | `string`                   | current origin                    |
+| `autocapture`       | `boolean`                  | `true`                            |
+| `capture_pageview`  | `boolean`                  | `true`                            |
+| `respect_dnt`       | `boolean`                  | `false`                           |
+| `debug`             | `boolean`                  | `false`                           |
+| `loaded`            | `(oak: OakApi) => void`    | —                                 |
 
 ## Plain HTML (no bundler)
 
