@@ -1,0 +1,43 @@
+{
+  "name": "oakdata-js",
+  "version": "0.1.0",
+  "description": "OakData web analytics SDK — drop-in tracker for browser + Next.js apps.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node build.mjs && tsc -p tsconfig.dts.json",
+    "build:watch": "node build.mjs --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist node_modules"
+  },
+  "keywords": [
+    "analytics",
+    "tracker",
+    "rrweb",
+    "session-replay",
+    "oakdata"
+  ],
+  "sideEffects": false,
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
