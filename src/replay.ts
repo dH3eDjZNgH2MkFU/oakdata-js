@@ -1,5 +1,5 @@
 import type { Config, Log, Session, Track } from './types'
-import type { OakReplayGlobal, RrwebEvent } from './replay-types'
+import type { OakReplayGlobal, RrwebEvent, RrwebRecordFn } from './replay-types'
 import type { ReplayConfig } from './remote-config'
 
 // Per-tab + per-page-load id, scoped to sessionStorage (not shared across
@@ -189,22 +189,28 @@ function startRecording(deps: ReplayDeps): ReplayController {
 }
 
 // ─── Bundle loader ───────────────────────────────────────────────────────────
+//
+// rrweb is heavy (~70KB gzip) and only needed if replay is enabled, so we
+// pull it via a dynamic import. The customer's bundler (Next/Vite/Webpack)
+// code-splits it into its own chunk and serves it alongside the main app —
+// no static asset to ship from the host. If `window.__oakReplay` is already
+// defined (e.g., a customer pre-loaded a self-hosted rrweb build), we honor
+// that and skip the import.
 
 let bundlePromise: Promise<OakReplayGlobal | null> | null = null
 
-function loadReplayBundle(config: Config): Promise<OakReplayGlobal | null> {
+function loadReplayBundle(_config: Config): Promise<OakReplayGlobal | null> {
   if (bundlePromise) return bundlePromise
   const w = window as typeof window & { __oakReplay?: OakReplayGlobal }
   if (w.__oakReplay) return Promise.resolve(w.__oakReplay)
 
-  bundlePromise = new Promise((resolve) => {
-    const src = config.host + (config.replayBundlePath || '/oak-replay.js')
-    const script = document.createElement('script')
-    script.src = src
-    script.async = true
-    script.onload = () => resolve(w.__oakReplay || null)
-    script.onerror = () => resolve(null)
-    document.head.appendChild(script)
-  })
+  bundlePromise = import('rrweb')
+    .then((mod) => {
+      const record = (mod as { record?: RrwebRecordFn }).record ??
+        (mod as { default?: { record?: RrwebRecordFn } }).default?.record
+      if (typeof record !== 'function') return null
+      return { version: 'rrweb', record }
+    })
+    .catch(() => null)
   return bundlePromise
 }

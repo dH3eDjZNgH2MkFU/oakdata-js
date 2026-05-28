@@ -21,6 +21,10 @@ const shared = {
   bundle: true,
   target: ['es2020'],
   platform: 'browser',
+  // Leave rrweb as an external dynamic import so the customer's bundler
+  // (Next/Vite/Webpack) code-splits it into its own chunk. Replay-disabled
+  // apps never pay the ~70KB cost.
+  external: ['rrweb'],
   // Customers' bundlers minify final output; ship readable JS + sourcemap so
   // they can see what oak is doing in stack traces.
   minify: false,

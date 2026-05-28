@@ -34,7 +34,6 @@ export function buildConfig(user: UserConfig): { config: Config } {
     ),
     respectDnt: bool(user.respectDnt, false),
     configPath: user.configPath || '/api/oak/config',
-    replayBundlePath: user.replayBundlePath || '/oak-replay.js',
   }
 
   return { config }

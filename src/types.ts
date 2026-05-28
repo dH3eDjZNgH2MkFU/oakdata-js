@@ -23,7 +23,6 @@ export interface UserConfig {
   sampleRates?: Record<string, number>
   respectDnt?: boolean
   configPath?: string
-  replayBundlePath?: string
 }
 
 export interface Config {
@@ -49,7 +48,6 @@ export interface Config {
   sampleRates: Record<string, number>
   respectDnt: boolean
   configPath: string
-  replayBundlePath: string
 }
 
 export type Log = (...args: unknown[]) => void
