@@ -2,6 +2,15 @@ import type { Config, Log, Session, Track } from './types'
 import type { OakReplayGlobal, RrwebEvent } from './replay-types'
 import type { ReplayConfig } from './remote-config'
 
+// Per-tab + per-page-load id, scoped to sessionStorage (not shared across
+// tabs). The `$session_id` is sticky for ~30min across page loads, but the
+// recorder's chunk counter resets on every load — so we use the `window_id`
+// to namespace chunk filenames on the server. Two tabs in the same session
+// get distinct window_ids; reloading a tab also gets a new window_id (the
+// `primaryWindowExists` flag is cleared on pagehide).
+const WINDOW_ID_STORAGE_KEY = 'oak_replay_window_id'
+const PRIMARY_WINDOW_FLAG = 'oak_replay_primary_window'
+
 const FLUSH_INTERVAL_MS = 5_000
 // Cap *uncompressed* NDJSON per chunk. Kept well under the transport's
 // maxPayloadBytes (900KB) so one snapshot + a few analytics events still fit
@@ -34,6 +43,35 @@ export interface ReplayDeps {
   getMeta: () => Pick<ReplayInit, 'browser' | 'os' | 'device_type'>
 }
 
+// Reuse a window_id only if the previous holder was still alive when the
+// browser unloaded (a true tab-reload). On a fresh tab or duplicate, mint a
+// new one. Modeled on PostHog's `primary_window_exists` pattern.
+function resolveWindowId(): string {
+  try {
+    const ss = window.sessionStorage
+    const stillPrimary = ss.getItem(PRIMARY_WINDOW_FLAG) === '1'
+    let id = ss.getItem(WINDOW_ID_STORAGE_KEY)
+    if (!id || !stillPrimary) {
+      id = uuid()
+      ss.setItem(WINDOW_ID_STORAGE_KEY, id)
+    }
+    ss.setItem(PRIMARY_WINDOW_FLAG, '1')
+    window.addEventListener('pagehide', () => {
+      try { ss.removeItem(PRIMARY_WINDOW_FLAG) } catch {}
+    })
+    return id
+  } catch {
+    return uuid()
+  }
+}
+
+function uuid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 'w-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
+
 export function installReplay(deps: ReplayDeps): ReplayController | null {
   if (!deps.replay.enabled) {
     deps.log('replay disabled for project')
@@ -47,9 +85,13 @@ export function installReplay(deps: ReplayDeps): ReplayController | null {
 function startRecording(deps: ReplayDeps): ReplayController {
   const { config, replay, session, log, track } = deps
 
+  const windowId = resolveWindowId()
   let buffer: RrwebEvent[] = []
   let bufferBytes = 0
-  let seq = 0
+  // Chunk index within *this* page-load. Combined with `windowId` server-side
+  // to form a unique storage path, so concurrent page-loads in the same
+  // session can't overwrite each other.
+  let chunkIdx = 0
   let stopRecording: (() => void) | null = null
   let sessionHasError = false
 
@@ -104,17 +146,18 @@ function startRecording(deps: ReplayDeps): ReplayController {
     const chunk = buffer
     buffer = []
     bufferBytes = 0
-    const sequence = seq++
+    const idx = chunkIdx++
 
     const props: Record<string, unknown> = {
       $snapshot_data: chunk,
-      $snapshot_seq: sequence,
+      $snapshot_idx: idx,
+      $window_id: windowId,
       $replay_has_errors: sessionHasError,
     }
-    // First chunk carries the init metadata used to denormalize the
-    // replay_sessions row (entry URL, viewport, UA). Subsequent chunks just
-    // bump the counter on the server.
-    if (sequence === 0) {
+    // First chunk of each page-load carries init metadata. The server only
+    // seeds the `replay_sessions` row on the first writer; later windows'
+    // init is harmlessly discarded.
+    if (idx === 0) {
       props.$replay_init = buildInit()
     }
     track('$snapshot', props)
