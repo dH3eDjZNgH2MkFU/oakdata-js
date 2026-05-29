@@ -21,7 +21,10 @@ export function buildConfig(user: UserConfig): { config: Config } {
     deadClicks: bool(user.deadClicks, true),
     longTasks: bool(user.longTasks, true),
     declarative: bool(user.declarative, true),
-    botFilter: bool(user.botFilter, true),
+    // Default OFF: we tag bot traffic and let the server classify it rather than
+    // dropping it client-side, so the dashboard can surface crawlers. Set true to
+    // opt back into hard client-side dropping (e.g. to minimize requests).
+    botFilter: bool(user.botFilter, false),
     compress: bool(user.compress, true),
     sessionTimeoutMs: user.sessionTimeoutMs || 30 * 60 * 1000,
     flushIntervalMs: user.flushIntervalMs || 5000,
@@ -34,6 +37,12 @@ export function buildConfig(user: UserConfig): { config: Config } {
     ),
     respectDnt: bool(user.respectDnt, false),
     configPath: user.configPath || '/api/oak/config',
+    propertyDenylist: Array.isArray(user.propertyDenylist)
+      ? user.propertyDenylist.filter((k) => typeof k === 'string')
+      : [],
+    beforeSend: user.beforeSend,
+    rateLimitPerSecond: num(user.rateLimitPerSecond, 10),
+    rateLimitBurst: num(user.rateLimitBurst, 100),
   }
 
   return { config }

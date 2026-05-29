@@ -1,5 +1,12 @@
 export type Props = Record<string, unknown>
 
+/**
+ * Hook run on every event just before it's enqueued. Return the (possibly
+ * mutated) event to send it, or null/false to drop it. Multiple hooks run in
+ * order; the first to drop wins.
+ */
+export type BeforeSend = (event: OakEvent) => OakEvent | null | false
+
 export interface UserConfig {
   key?: string
   host?: string
@@ -23,6 +30,14 @@ export interface UserConfig {
   sampleRates?: Record<string, number>
   respectDnt?: boolean
   configPath?: string
+  /** Property keys stripped from every event before send (PII / noise control). */
+  propertyDenylist?: string[]
+  /** Hook(s) to mutate or drop events before they're sent. */
+  beforeSend?: BeforeSend | BeforeSend[]
+  /** Sustained client-side capture rate (events/sec) before throttling kicks in. */
+  rateLimitPerSecond?: number
+  /** Token-bucket burst capacity for the capture rate limiter. */
+  rateLimitBurst?: number
 }
 
 export interface Config {
@@ -48,6 +63,10 @@ export interface Config {
   sampleRates: Record<string, number>
   respectDnt: boolean
   configPath: string
+  propertyDenylist: string[]
+  beforeSend?: BeforeSend | BeforeSend[]
+  rateLimitPerSecond: number
+  rateLimitBurst: number
 }
 
 export type Log = (...args: unknown[]) => void

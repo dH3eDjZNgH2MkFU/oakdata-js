@@ -9,7 +9,7 @@
  *     api_host: process.env.NEXT_PUBLIC_OAK_HOST,
  *   })
  */
-import type { OakApi, Props, UrlSnapshot, UserConfig } from './types'
+import type { BeforeSend, OakApi, Props, UrlSnapshot, UserConfig } from './types'
 import { buildConfig, createLog } from './config'
 import { createStorage } from './storage'
 import { isBot } from './bot'
@@ -44,6 +44,10 @@ export type InitOptions = {
   debug?: boolean
   /** Version-pinned defaults marker, accepted for forward-compat (no-op today). */
   defaults?: string
+  /** Property keys stripped from every event before send (PII / noise control). */
+  property_denylist?: string[]
+  /** Hook(s) to mutate or drop events before they're sent. */
+  before_send?: BeforeSend | BeforeSend[]
   /** Called once the tracker is wired up. */
   loaded?: (oak: OakApi) => void
 }
@@ -55,6 +59,8 @@ function mapOptions(options: InitOptions): Omit<UserConfig, 'key'> {
     autotrack: options.autocapture,
     pageviews: options.capture_pageview,
     respectDnt: options.respect_dnt,
+    propertyDenylist: options.property_denylist,
+    beforeSend: options.before_send,
   }
 }
 
@@ -85,7 +91,11 @@ function bootstrap(userConfig: UserConfig): OakApi | null {
   if (config.respectDnt && (navigator.doNotTrack === '1' || navigator.doNotTrack === 'yes')) {
     log('DNT honored — tracker disabled.'); return null
   }
-  if (config.botFilter && isBot()) { log('Bot detected — tracker disabled.'); return null }
+  // Client-side bot signal (UA + navigator.webdriver). By default we don't drop —
+  // we tag events with `$bot` below so the server can classify and the dashboard
+  // can surface bot traffic. `botFilter: true` opts back into hard dropping.
+  const botDetected = isBot()
+  if (config.botFilter && botDetected) { log('Bot detected — tracker disabled.'); return null }
 
   const storage = createStorage()
   const { store, load, clearKey } = storage
@@ -103,6 +113,9 @@ function bootstrap(userConfig: UserConfig): OakApi | null {
 
   let traits: Props = load<Props>('traits') || {}
   let superProps: Props = load<Props>('super') || {}
+  // Tag every event from a detected bot. In-memory only (not persisted), so it's
+  // recomputed each load and the server stays the source of truth for the flag.
+  if (botDetected) superProps.$bot = true
   let groups: Record<string, { id: string; traits: Props }> =
     load<Record<string, { id: string; traits: Props }>>('groups') || {}
 

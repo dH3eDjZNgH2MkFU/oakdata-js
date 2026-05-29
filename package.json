@@ -23,7 +23,8 @@
     "build": "node build.mjs && tsc -p tsconfig.dts.json",
     "build:watch": "node build.mjs --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf dist node_modules"
+    "clean": "rm -rf dist node_modules",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "analytics",

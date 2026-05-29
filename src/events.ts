@@ -1,7 +1,8 @@
-import type { Config, Log, OakEvent, Props, Session, Track } from './types'
+import type { BeforeSend, Config, Log, OakEvent, Props, Session, Track } from './types'
 import type { AttributionState } from './attribution'
 import { referrerInfo } from './attribution'
 import { fillUaCh, fingerprint, hardwareInfo, localeInfo, networkInfo, screenInfo, uaParse } from './device'
+import { createRateLimiter } from './rate-limit'
 import { uuid } from './util'
 
 export interface EventBuilderDeps {
@@ -22,6 +23,13 @@ export interface EventBuilderDeps {
 export function createTrack(deps: EventBuilderDeps): Track {
   const { config, log, session, attribution, getDistinctId, getAnonId, getTraits, getSuperProps, getGroups, touchSession, enqueue } = deps
   let deviceContext: Props | null = null
+
+  const limiter = createRateLimiter(config.rateLimitPerSecond, config.rateLimitBurst, log)
+  const beforeSend: BeforeSend[] = Array.isArray(config.beforeSend)
+    ? config.beforeSend
+    : config.beforeSend
+      ? [config.beforeSend]
+      : []
 
   function buildDeviceContext(): Props {
     if (deviceContext) return deviceContext
@@ -97,7 +105,26 @@ export function createTrack(deps: EventBuilderDeps): Track {
 
   return function track(name: string, properties?: Props): OakEvent | null {
     if (!shouldSample(name)) return null
-    const ev = buildEvent(name, properties)
+    if (!limiter.consume()) { log('rate limited, dropping', name); return null }
+
+    let ev: OakEvent | null = buildEvent(name, properties)
+
+    // Strip denylisted properties (PII / noise) before any hook sees them.
+    if (config.propertyDenylist.length) {
+      for (const k of config.propertyDenylist) delete ev.properties[k]
+    }
+
+    // before_send hooks may mutate or drop the event. First drop wins.
+    for (const fn of beforeSend) {
+      try {
+        ev = fn(ev) || null
+      } catch (err) {
+        log('before_send threw, dropping', name, err)
+        return null
+      }
+      if (!ev) { log('before_send dropped', name); return null }
+    }
+
     log('event', ev.event, ev.properties)
     enqueue(ev)
     return ev
