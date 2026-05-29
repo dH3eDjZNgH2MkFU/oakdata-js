@@ -1,6 +1,6 @@
 {
   "name": "oakdata-js",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "OakData web analytics SDK — drop-in tracker for browser + Next.js apps.",
   "license": "MIT",
   "type": "module",
